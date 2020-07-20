@@ -1,17 +1,24 @@
 const fs = require("fs");
 const url = require("url");
 const https = require("https");
+const request = require("request");
 const log = (...args) => console.log("→", ...args);
-const list = require("./videojson.js");
+const config = require("./videojson.js");
 const promises = [];
 
-function loadVideo(num, cb) {
-  let masterUrl = list[num].url;
+const list = config.list
+const proxy = config.proxy
+
+let index = -1;
+
+function loadVideo(obj,cb) {
+  let masterUrl = obj.url;
   if (!masterUrl.endsWith("?base64_init=1")) {
     masterUrl += "?base64_init=1";
   }
 
   getJson(masterUrl, (err, json) => {
+    log("Fetching JSON...")
     if (err) {
       return cb(err);
     }
@@ -37,7 +44,7 @@ function loadVideo(num, cb) {
       videoBaseUrl,
       videoData.init_segment,
       videoData.segments,
-      list[num].name + ".m4v",
+      obj.name + ".m4v",
       err => {
         if (err) {
           return cb(err);
@@ -48,13 +55,14 @@ function loadVideo(num, cb) {
           audioBaseUrl,
           audioData.init_segment,
           audioData.segments,
-          list[num].name + ".m4a",
+          obj.name + ".m4a",
           err => {
             if (err) {
               return cb(err);
             }
 
-            cb(null, num + 1);
+            // Call next video
+            cb(null);
           }
         );
       }
@@ -107,46 +115,80 @@ function combineSegments(type, i, segmentsUrl, output, filename, downloadingFlag
     `Downloading ${type} segment ${i}/${segmentsUrl.length} of ${filename}`
   );
 
-  https
-    .get(segmentsUrl[i], res => {
-      res.on("data", d => output.write(d));
+  // https
+  //   .get(segmentsUrl[i], res => {
+  //     res.on("data", d => output.write(d));
 
-      res.on("end", () =>
-        combineSegments(type, i + 1, segmentsUrl, output, filename, downloadingFlag, cb)
-      );
-    })
-    .on("error", e => {
-      cb(e);
-    });
+  //     res.on("end", () =>
+  //       combineSegments(type, i + 1, segmentsUrl, output, filename, downloadingFlag, cb)
+  //     );
+  //   })
+  //   .on("error", e => {
+  //     cb(e);
+  //   });
+  request
+  .get({
+    'url':segmentsUrl[i],
+    'method':'GET',
+    'proxy':proxy ? proxy : null
+  })
+  .on("data", d => output.write(d))
+  .on("end", () =>
+    combineSegments(type, i + 1, segmentsUrl, output, filename, downloadingFlag, cb)
+  )
+  .on("error", e => {
+    cb(e);
+  })
 }
 
 function getJson(url, cb) {
   let data = "";
 
-  https
-    .get(url, res => {
-      res.on("data", d => (data += d));
+  // https
+  //   .get(url, res => {
+  //     res.on("data", d => (data += d));
 
-      res.on("end", () => cb(null, JSON.parse(data)));
-    })
-    .on("error", e => {
-      cb(e);
-    });
+  //     res.on("end", () => cb(null, JSON.parse(data)));
+  //   })
+  //   .on("error", e => {
+  //     cb(e);
+  //   });
+  request
+  .get({
+    'url':url,
+    'method':'GET',
+    'proxy':proxy ? proxy : null
+  })
+  .on("data", d => (data += d))
+  .on("end", () => cb(null, JSON.parse(data)))
+  .on("error", e => {
+    cb(e);
+  });
+
 }
 
-function initJs(n = 0) {
-  if (!list[n] || (!list[n].name && !list[n].url)) return;
-
-  loadVideo(n, (err, num) => {
+function initJs(obj = null) {
+  loadVideo(obj, (err) => {
     if (err) {
       log("⚠️", ` ${err}`);
       return;
     }
 
-    if (list[num]) {
-      initJs(num);
+    let v = getNextVideo()
+    // Before next video
+    if (v) {
+      initJs();
     }
   });
 }
 
-initJs();
+
+function getNextVideo(){
+  index+=1;
+  return list[index]
+}
+
+let obj = getNextVideo()
+if(obj){
+  initJs(obj);
+}
